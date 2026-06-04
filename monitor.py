@@ -73,6 +73,10 @@ class Config:
     browser_wait_seconds: int
     user_agent: str
     database_url: str | None
+    state_backend: str | None
+    github_repository: str | None
+    github_token: str | None
+    github_state_variable: str
     state_file: Path
 
 
@@ -241,6 +245,63 @@ class PostgresStateStore:
             )
 
 
+class GitHubActionsVariableStateStore:
+    def __init__(self, repository: str, token: str, variable_name: str) -> None:
+        self.repository = repository
+        self.token = token
+        self.variable_name = variable_name
+        self.api_url = (
+            f"https://api.github.com/repos/{repository}/actions/variables"
+        )
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {self.token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def load(self) -> dict[str, Any]:
+        response = requests.get(
+            f"{self.api_url}/{self.variable_name}",
+            headers=self._headers(),
+            timeout=20,
+        )
+        if response.status_code == 404:
+            return {}
+
+        response.raise_for_status()
+        raw_value = response.json().get("value")
+        if not raw_value:
+            return {}
+
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            logger.warning("Could not parse GitHub state variable: %s", exc)
+            return {}
+
+    def save(self, state: dict[str, Any]) -> None:
+        payload = json.dumps(state, ensure_ascii=False, sort_keys=True)
+        update_response = requests.patch(
+            f"{self.api_url}/{self.variable_name}",
+            headers=self._headers(),
+            json={"name": self.variable_name, "value": payload},
+            timeout=20,
+        )
+        if update_response.status_code != 404:
+            update_response.raise_for_status()
+            return
+
+        create_response = requests.post(
+            self.api_url,
+            headers=self._headers(),
+            json={"name": self.variable_name, "value": payload},
+            timeout=20,
+        )
+        create_response.raise_for_status()
+
+
 def setup_logging() -> None:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -310,6 +371,13 @@ def load_config() -> Config:
         ),
         user_agent=os.getenv("USER_AGENT", DEFAULT_USER_AGENT),
         database_url=os.getenv("DATABASE_URL"),
+        state_backend=os.getenv("STATE_BACKEND"),
+        github_repository=os.getenv("GITHUB_REPOSITORY"),
+        github_token=os.getenv("GITHUB_TOKEN"),
+        github_state_variable=os.getenv(
+            "GITHUB_STATE_VARIABLE",
+            "PASSPORT_SERVICE_PRAGUE_STATE",
+        ),
         state_file=Path(os.getenv("STATE_FILE", STATE_FILE_DEFAULT)),
     )
 
@@ -328,6 +396,15 @@ def sqlite_path_from_url(database_url: str) -> Path | str:
 
 
 def create_state_store(config: Config) -> StateStore:
+    if config.state_backend == "github_actions":
+        if config.github_repository and config.github_token:
+            return GitHubActionsVariableStateStore(
+                repository=config.github_repository,
+                token=config.github_token,
+                variable_name=config.github_state_variable,
+            )
+        logger.warning("GitHub Actions state backend requested but not configured.")
+
     if not config.database_url:
         return LocalJsonStateStore(config.state_file)
 
