@@ -1,0 +1,9 @@
+{
+  "http_status_code": 403,
+  "last_checked_at": "2026-06-04T18:13:16.136509+00:00",
+  "last_error": "HTTP 403",
+  "last_notification_at": "2026-06-04T18:13:16.136509+00:00",
+  "last_notification_key": "blocked:403:HTTP 403",
+  "status": "blocked",
+  "text_hash": "375d183f73f18bb43fed7b875763395f4049ac763db9a2482e3d99f90c4bd397"
+}
