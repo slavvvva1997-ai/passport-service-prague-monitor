@@ -2,7 +2,7 @@ services:
   - type: cron
     name: passport-service-prague-monitor
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
     startCommand: python monitor.py
     schedule: "*/5 * * * *"
     envVars:
@@ -12,6 +12,8 @@ services:
         value: "1800"
       - key: REQUEST_TIMEOUT_SECONDS
         value: "20"
+      - key: BROWSER_WAIT_SECONDS
+        value: "5"
       - key: USER_AGENT
         value: "Mozilla/5.0 (compatible; PassportServicePragueMonitor/1.0; +https://prague.pasport.org.ua/solutions/e-queue)"
       - key: TELEGRAM_BOT_TOKEN

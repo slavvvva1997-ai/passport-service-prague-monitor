@@ -6,7 +6,7 @@
 
 https://prague.pasport.org.ua/solutions/e-queue
 
-Скрипт запускается как Railway Cron Job или Render Cron Job каждые 5 минут, получает HTML страницы, извлекает чистый текст, определяет статус и отправляет Telegram-уведомление только при изменении статуса или заметном изменении текста страницы.
+Скрипт запускается как Railway Cron Job, Render Cron Job или GitHub Actions cron каждые 5 минут. Он открывает публичную страницу через Playwright + headless Chromium, получает HTML, извлекает чистый текст, определяет статус и отправляет Telegram-уведомление только при изменении статуса или заметном изменении текста страницы.
 
 Статусы:
 
@@ -27,6 +27,8 @@ https://prague.pasport.org.ua/solutions/e-queue
 - не гарантирует наличие талонов.
 
 Проект только проверяет публичную страницу и отправляет уведомление.
+
+Если сайт показывает защитную страницу, Cloudflare challenge или капчу, скрипт помечает состояние как `blocked` и не пытается обходить защиту.
 
 ## 3. Как создать Telegram-бота через BotFather
 
@@ -82,6 +84,7 @@ TELEGRAM_CHAT_ID=...
 URL=https://prague.pasport.org.ua/solutions/e-queue
 NOTIFY_COOLDOWN_SECONDS=1800
 REQUEST_TIMEOUT_SECONDS=20
+BROWSER_WAIT_SECONDS=5
 USER_AGENT=Mozilla/5.0 (compatible; PassportServicePragueMonitor/1.0; +https://prague.pasport.org.ua/solutions/e-queue)
 DATABASE_URL=...
 ```
@@ -102,7 +105,7 @@ Railway cron использует UTC и не запускает jobs чаще �
 4. Build Command:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt && python -m playwright install --with-deps chromium
 ```
 
 5. Command:
@@ -139,6 +142,7 @@ Render Cron Jobs не имеют постоянного диска, поэтом
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+python -m playwright install chromium
 copy .env.example .env
 python monitor.py --dry-run
 python monitor.py --test-telegram
@@ -151,6 +155,7 @@ python monitor.py
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium
 cp .env.example .env
 python monitor.py --dry-run
 python monitor.py --test-telegram
@@ -196,6 +201,7 @@ Render:
 - `URL`
 - `NOTIFY_COOLDOWN_SECONDS`
 - `REQUEST_TIMEOUT_SECONDS`
+- `BROWSER_WAIT_SECONDS`
 - `USER_AGENT`
 - `DATABASE_URL`
 - `STATE_FILE`

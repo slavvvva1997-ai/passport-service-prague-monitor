@@ -17,7 +17,9 @@ from typing import Any, Protocol
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from requests import Response
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 from requests.exceptions import RequestException
 
 
@@ -28,6 +30,7 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (compatible; PassportServicePragueMonitor/1.0; "
     "+https://prague.pasport.org.ua/solutions/e-queue)"
 )
+DEFAULT_BROWSER_WAIT_SECONDS = 5
 STATE_KEY = "passport_service_prague"
 STATE_FILE_DEFAULT = "state.json"
 TEST_TELEGRAM_MESSAGE = "✅ Онлайн-мониторинг Паспортного сервиса запущен."
@@ -49,6 +52,14 @@ POSSIBLY_AVAILABLE_PHRASES = (
     "електронна черга",
 )
 
+BLOCKED_PAGE_PHRASES = (
+    "Just a moment",
+    "Enable JavaScript and cookies to continue",
+    "Checking your browser",
+    "Cloudflare",
+    "captcha",
+)
+
 logger = logging.getLogger("passport_monitor")
 
 
@@ -59,6 +70,7 @@ class Config:
     telegram_chat_id: str | None
     notify_cooldown_seconds: int
     request_timeout_seconds: int
+    browser_wait_seconds: int
     user_agent: str
     database_url: str | None
     state_file: Path
@@ -230,6 +242,10 @@ class PostgresStateStore:
 
 
 def setup_logging() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -288,6 +304,10 @@ def load_config() -> Config:
             "REQUEST_TIMEOUT_SECONDS",
             DEFAULT_TIMEOUT_SECONDS,
         ),
+        browser_wait_seconds=read_int_env(
+            "BROWSER_WAIT_SECONDS",
+            DEFAULT_BROWSER_WAIT_SECONDS,
+        ),
         user_agent=os.getenv("USER_AGENT", DEFAULT_USER_AGENT),
         database_url=os.getenv("DATABASE_URL"),
         state_file=Path(os.getenv("STATE_FILE", STATE_FILE_DEFAULT)),
@@ -324,15 +344,6 @@ def create_state_store(config: Config) -> StateStore:
     return LocalJsonStateStore(config.state_file)
 
 
-def build_headers(config: Config) -> dict[str, str]:
-    return {
-        "User-Agent": config.user_agent,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "uk-UA,uk;q=0.9,ru;q=0.8,en;q=0.7",
-        "Cache-Control": "no-cache",
-    }
-
-
 def clean_html_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator=" ", strip=True)
@@ -345,6 +356,10 @@ def hash_text(text: str) -> str:
 
 def determine_status(text: str) -> str:
     lowered_text = text.casefold()
+    blocked = any(phrase.casefold() in lowered_text for phrase in BLOCKED_PAGE_PHRASES)
+    if blocked:
+        return "blocked"
+
     unavailable = any(
         phrase.casefold() in lowered_text for phrase in UNAVAILABLE_PHRASES
     )
@@ -363,45 +378,88 @@ def determine_status(text: str) -> str:
     return "error"
 
 
-def status_from_http_error(response: Response) -> str:
-    if response.status_code in {403, 429}:
+def status_from_http_error(status_code: int | None) -> str:
+    if status_code in {403, 429}:
         return "blocked"
     return "error"
 
 
 def fetch_page(config: Config) -> MonitorResult:
+    timeout_ms = config.request_timeout_seconds * 1000
+
     try:
-        response = requests.get(
-            config.url,
-            headers=build_headers(config),
-            timeout=config.request_timeout_seconds,
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                ],
+            )
+            context = browser.new_context(
+                user_agent=config.user_agent,
+                locale="uk-UA",
+                timezone_id="Europe/Prague",
+                viewport={"width": 1365, "height": 900},
+                extra_http_headers={
+                    "Accept-Language": "uk-UA,uk;q=0.9,ru;q=0.8,en;q=0.7",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            page = context.new_page()
+
+            try:
+                response = page.goto(
+                    config.url,
+                    wait_until="domcontentloaded",
+                    timeout=timeout_ms,
+                )
+                page.wait_for_timeout(config.browser_wait_seconds * 1000)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5_000)
+                except PlaywrightTimeoutError:
+                    pass
+
+                http_status_code = response.status if response else None
+                html = page.content()
+            finally:
+                context.close()
+                browser.close()
+    except PlaywrightTimeoutError as exc:
+        return MonitorResult(
+            url=config.url,
+            http_status_code=None,
+            status="blocked",
+            text="",
+            text_hash=None,
+            error_message=f"Playwright timeout: {exc}",
         )
-    except RequestException as exc:
+    except PlaywrightError as exc:
         return MonitorResult(
             url=config.url,
             http_status_code=None,
             status="error",
             text="",
             text_hash=None,
-            error_message=f"Request failed: {exc}",
+            error_message=f"Playwright failed: {exc}",
         )
 
-    text = clean_html_text(response.text)
+    text = clean_html_text(html)
     text_hash = hash_text(text) if text else None
 
-    if response.status_code >= 400:
+    if http_status_code is not None and http_status_code >= 400:
         return MonitorResult(
             url=config.url,
-            http_status_code=response.status_code,
-            status=status_from_http_error(response),
+            http_status_code=http_status_code,
+            status=status_from_http_error(http_status_code),
             text=text,
             text_hash=text_hash,
-            error_message=f"HTTP {response.status_code}",
+            error_message=f"HTTP {http_status_code}",
         )
 
     return MonitorResult(
         url=config.url,
-        http_status_code=response.status_code,
+        http_status_code=http_status_code,
         status=determine_status(text),
         text=text,
         text_hash=text_hash,
