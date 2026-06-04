@@ -1,0 +1,22 @@
+services:
+  - type: cron
+    name: passport-service-prague-monitor
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python monitor.py
+    schedule: "*/5 * * * *"
+    envVars:
+      - key: URL
+        value: https://prague.pasport.org.ua/solutions/e-queue
+      - key: NOTIFY_COOLDOWN_SECONDS
+        value: "1800"
+      - key: REQUEST_TIMEOUT_SECONDS
+        value: "20"
+      - key: USER_AGENT
+        value: "Mozilla/5.0 (compatible; PassportServicePragueMonitor/1.0; +https://prague.pasport.org.ua/solutions/e-queue)"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
