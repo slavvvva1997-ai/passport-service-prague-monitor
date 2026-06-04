@@ -23,6 +23,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       STATE_BACKEND: github_actions
       GITHUB_STATE_VARIABLE: PASSPORT_SERVICE_PRAGUE_STATE
+      GITHUB_TOKEN: ${{ github.token }}
       URL: https://prague.pasport.org.ua/solutions/e-queue
       NOTIFY_COOLDOWN_SECONDS: "1800"
       REQUEST_TIMEOUT_SECONDS: "20"
