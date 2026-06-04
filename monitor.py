@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import logging
@@ -77,6 +78,7 @@ class Config:
     github_repository: str | None
     github_token: str | None
     github_state_variable: str
+    github_state_path: str
     state_file: Path
 
 
@@ -302,6 +304,67 @@ class GitHubActionsVariableStateStore:
         create_response.raise_for_status()
 
 
+class GitHubContentsStateStore:
+    def __init__(self, repository: str, token: str, path: str) -> None:
+        self.repository = repository
+        self.token = token
+        self.path = path
+        self.api_url = f"https://api.github.com/repos/{repository}/contents/{path}"
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {self.token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def _read_remote(self) -> tuple[dict[str, Any], str | None]:
+        response = requests.get(self.api_url, headers=self._headers(), timeout=20)
+        if response.status_code == 404:
+            return {}, None
+
+        response.raise_for_status()
+        body = response.json()
+        encoded_content = body.get("content", "")
+        cleaned_content = encoded_content.replace("\n", "")
+        decoded = base64.b64decode(cleaned_content).decode("utf-8")
+        return json.loads(decoded), body.get("sha")
+
+    def load(self) -> dict[str, Any]:
+        try:
+            state, _ = self._read_remote()
+            return state
+        except json.JSONDecodeError as exc:
+            logger.warning("Could not parse GitHub contents state: %s", exc)
+            return {}
+
+    def save(self, state: dict[str, Any]) -> None:
+        current_state, sha = self._read_remote()
+        if state_without_check_time(current_state) == state_without_check_time(state):
+            return
+
+        payload = json.dumps(
+            state,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        body: dict[str, Any] = {
+            "message": "chore: update monitor state",
+            "content": base64.b64encode(payload.encode("utf-8")).decode("ascii"),
+        }
+        if sha:
+            body["sha"] = sha
+
+        response = requests.put(
+            self.api_url,
+            headers=self._headers(),
+            json=body,
+            timeout=20,
+        )
+        response.raise_for_status()
+
+
 def setup_logging() -> None:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -378,6 +441,10 @@ def load_config() -> Config:
             "GITHUB_STATE_VARIABLE",
             "PASSPORT_SERVICE_PRAGUE_STATE",
         ),
+        github_state_path=os.getenv(
+            "GITHUB_STATE_PATH",
+            ".monitor-state/state.json",
+        ),
         state_file=Path(os.getenv("STATE_FILE", STATE_FILE_DEFAULT)),
     )
 
@@ -396,6 +463,15 @@ def sqlite_path_from_url(database_url: str) -> Path | str:
 
 
 def create_state_store(config: Config) -> StateStore:
+    if config.state_backend == "github_contents":
+        if config.github_repository and config.github_token:
+            return GitHubContentsStateStore(
+                repository=config.github_repository,
+                token=config.github_token,
+                path=config.github_state_path,
+            )
+        logger.warning("GitHub contents state backend requested but not configured.")
+
     if config.state_backend == "github_actions":
         if config.github_repository and config.github_token:
             return GitHubActionsVariableStateStore(
@@ -419,6 +495,14 @@ def create_state_store(config: Config) -> StateStore:
 
     logger.warning("Unsupported DATABASE_URL scheme; using local state file.")
     return LocalJsonStateStore(config.state_file)
+
+
+def state_without_check_time(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in state.items()
+        if key != "last_checked_at"
+    }
 
 
 def clean_html_text(html: str) -> str:

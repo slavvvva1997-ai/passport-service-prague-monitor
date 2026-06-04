@@ -17,7 +17,7 @@ https://prague.pasport.org.ua/solutions/e-queue
 - `unknown`
 
 Состояние хранится в PostgreSQL/SQLite через `DATABASE_URL` или локально в `state.json`.
-Для GitHub Actions можно использовать `STATE_BACKEND=github_actions`, тогда состояние хранится в GitHub Actions repository variable.
+Для GitHub Actions можно использовать `STATE_BACKEND=github_contents`, тогда состояние хранится в маленьком JSON-файле в репозитории. Файл обновляется только когда меняется значимое состояние, а не на каждом cron-запуске.
 
 ## 2. Что проект НЕ делает
 
@@ -206,6 +206,7 @@ Render:
 - `USER_AGENT`
 - `DATABASE_URL`
 - `STATE_BACKEND`
+- `GITHUB_STATE_PATH`
 - `GITHUB_STATE_VARIABLE`
 - `STATE_FILE`
 
