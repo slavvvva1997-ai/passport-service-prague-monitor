@@ -1,0 +1,39 @@
+name: Passport Service Prague Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: passport-service-prague-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      URL: https://prague.pasport.org.ua/solutions/e-queue
+      NOTIFY_COOLDOWN_SECONDS: "1800"
+      REQUEST_TIMEOUT_SECONDS: "20"
+      USER_AGENT: Mozilla/5.0 (compatible; PassportServicePragueMonitor/1.0; +https://prague.pasport.org.ua/solutions/e-queue)
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        run: python monitor.py
