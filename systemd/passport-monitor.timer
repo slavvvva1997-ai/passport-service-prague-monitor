@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Passport Service Prague monitor every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=passport-monitor.service
+
+[Install]
+WantedBy=timers.target

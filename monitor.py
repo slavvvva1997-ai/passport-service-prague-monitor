@@ -698,6 +698,14 @@ def build_notification_decision(
             notification_key = (
                 f"{result.status}:{result.http_status_code}:{result.error_message}"
             )
+            if notification_key == previous_state.get("last_notification_key"):
+                return NotificationDecision(
+                    False,
+                    notification_key,
+                    None,
+                    "same_error_already_notified",
+                )
+
             message = build_message_for_status(
                 result.status,
                 result.url,

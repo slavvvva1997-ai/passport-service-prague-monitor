@@ -1,0 +1,7 @@
+[Unit]
+Description=Passport Service Prague monitor
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/passport-service-prague-monitor
+ExecStart=/usr/bin/docker compose run --rm monitor

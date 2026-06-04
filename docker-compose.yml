@@ -1,0 +1,12 @@
+services:
+  monitor:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - monitor-state:/app/state
+    environment:
+      STATE_FILE: /app/state/state.json
+
+volumes:
+  monitor-state:

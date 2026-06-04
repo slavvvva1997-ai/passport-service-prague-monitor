@@ -135,6 +135,25 @@ Render Cron Jobs не имеют постоянного диска, поэтом
 - Не пытайся обходить защиту, SMS, Viber, Дію или капчу.
 - Используй уведомление `blocked` как сигнал, что мониторинг не может проверить страницу.
 
+Если локальный Playwright получает `HTTP 200`, а GitHub Actions/Render/Railway получает `HTTP 403`, проблема в IP/среде запуска. В этом случае самый надежный вариант без телефона и личного компьютера — маленький VPS с Docker, где сначала вручную проверяется:
+
+```bash
+docker compose build
+docker compose run --rm monitor python monitor.py --dry-run
+```
+
+Если VPS получает `HTTP 200`, включи systemd timer:
+
+```bash
+sudo cp systemd/passport-monitor.service /etc/systemd/system/
+sudo cp systemd/passport-monitor.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now passport-monitor.timer
+systemctl list-timers passport-monitor.timer
+```
+
+Если VPS тоже получает `403`, этот провайдер не подходит. Не используй proxy rotation, captcha-solving или обход защитных механизмов.
+
 ## 9. Как проверить, что всё работает
 
 Локально:
